@@ -1,0 +1,62 @@
+# Configuration file for ingesting and processing NAIP image tiles
+
+random_seed: 42
+
+config_version: "dev" # can be "prod" or "dev". If "dev", will use a smaller subset of data for testing
+
+rerun: False # whether to rerun the entire pipeline
+
+n_cpu: 8
+
+to_crs: "EPSG:26915" # coordinate reference system
+
+# Google Cloud Storage
+gcs:
+  client: "law-cafo"
+  gc_bucket: "image-hub"
+  gc_folder_prefix: "IA/"
+  service_account_path: "service_account.json" # path to the GCS service account json file
+
+# Earth Engine
+ee:
+  image_dataset: "USDA/NAIP/DOQQ" # which image dataset to choose
+  image_scale: 1 # scale of images (in meters)
+  max_pixels: 10000000000000 # maximum pixels allowed in export image
+  file_format: "GeoTIFF" # format to store file in
+  redownload: False # whether to redownload images from Earth Engine
+
+# NAIP21QQ tiles
+naip_imgs:
+  paths:
+    raw: "data/NAIP21QQ/01_raw_tiles/tifs/"
+    cropped: "data/NAIP21QQ/02_cropped_tiles/tifs/"
+    quartered: "data/NAIP21QQ/03_quartered_tiles/tifs/"
+    quartered_buffer: "data/NAIP21QQ/04_quartered_buffer_tiles/tifs/"
+    test: "data/NAIP21QQ/test/tifs/"
+  mask_urban_areas: True # whether to mask urban areas
+  jpeg_bands: "RGB" # bands to use for jpeg images. Defaults to RGB, but can be changed to any combination of N, R, G, B
+  buffer_size: 200 # buffer size (in meters)
+
+# Batch creation
+batches:
+  batch_size: 1000 # number of images per batch
+  sampling_dict: # dictionary of sampling rate per bin
+    "0": 0.01
+  urban_area_cutoff: 1 # exclude images with more than this percentage of urban area
+
+# Dataloop and Cloud Factory
+dataloop:
+  dl_project: "RegLab_Prod"
+  gc_source_folder: "data/NAIP21QQ/04_quartered_buffer_tiles/jpegs/"
+  destination_folder: null # if null, will use the batch file name, but without the date and extension
+
+# Annotations
+annotations:
+  local_folder: "data/annotations/"
+  filter_unannotated: False # if true, will only download jsons for images with annotations
+  annotations_format: "dataloop" # format to convert the annotations to. Can be dataloop, yolo, coco, and voc
+
+
+# cache files
+cache:
+  locations_path: "data/cache/locations.csv"

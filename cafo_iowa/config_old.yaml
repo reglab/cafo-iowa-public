@@ -1,0 +1,88 @@
+# Configuration file for the cafo_iowa project
+
+random_seed: 42
+
+config_version: "prod" # can be "prod" or "dev". If "dev", will use a smaller subset of data for testing
+
+dev:
+  n_tiles: 10 # number of tiles to use for testing
+  random: False # whether to randomly select tiles. If not, selects first n_tiles tiles
+
+verbose: True # whether to show output or not
+
+rerun_all: False # whether to rerun the entire pipeline
+rerun_ee_dump: False # whether to rerun the Earth Engine dump
+rerun_gcs_download: False # whether to rerun the GCS download
+rerun_crop: False # whether to rerun the crop step
+rerun_mask_urban: True # whether to rerun the mask urban areas step
+rerun_jpeg: False # whether to rerun the jpeg step
+rerun_gcs_upload: True # whether to rerun the GCS upload step
+
+# log files
+logs:
+  output_path: "logs/"
+
+# CPU
+n_cpu: 85 # number of jobs to run in parallel
+
+# plots:
+plots:
+  output_path: "output/plots/"
+  dpi: 300
+  bbox_inches: "tight"
+
+# tables:
+tables:
+  output_path: "output/tables/"
+
+# Google Cloud Storage
+gcs:
+  client: "law-cafo"
+  gc_bucket: "image-hub"
+  gc_folder_prefix: "IA/"
+  service_account_path: "service_account.json" # path to the GCS service account json file
+
+# Permits
+permits:
+  input_path: "data/permits/raw/"
+  output_path: "data/permits/processed/permits.csv"
+
+# NAIP Shape files
+naip_shp:
+  input_path: "data/NAIP21QQ_shp/raw/"
+  output_path: "data/NAIP21QQ_shp/processed/"
+  buffer_size: 200 # buffer size around tiles for CF labelling (in meters)
+
+# Urban areas
+urban_shp:
+  input_path: "data/urban_areas/raw/"
+  output_path: "data/urban_areas/processed/urban_areas.feather"
+
+# NAIP21QQ tiles
+naip:
+  paths:
+    raw: "data/NAIP21QQ/01_raw_tiles/tifs/"
+    cropped: "data/NAIP21QQ/02_cropped_tiles/tifs/"
+    quartered: "data/NAIP21QQ/03_quartered_tiles/tifs/"
+    quartered_buffer: "data/NAIP21QQ/04_quartered_buffer_tiles/tifs/"
+    test: "data/NAIP21QQ/test/tifs/"
+  mask_urban_areas: True # whether to mask urban areas
+  jpeg_bands: "RGB" # bands to use for jpeg images. Defaults to RGB, but can be changed to any combination of N, R, G, B
+
+
+  # Earth Engine
+  ee:
+    image_dataset: "USDA/NAIP/DOQQ" # which image dataset to choose
+    image_scale: 1 # scale of images (in meters)
+    max_pixels: 10000000000000 # maximum pixels allowed in export image
+    file_format: "GeoTIFF" # format to store file in
+
+# Dataloop and Cloud Factory
+dataloop:
+  dl_project: "RegLab_Prod"
+  source_folder: "data/NAIP21QQ/04_quartered_buffer_tiles/jpegs/"
+  destination_folder: null # if null, will use the batch file name, but without the date and extension
+
+# cache files
+cache:
+  locations_path: "data/cache/locations.csv"
