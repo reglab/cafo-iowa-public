@@ -1,6 +1,11 @@
-# Data folder in root directory
+# Data folder in root directory — commit scripts and metadata, ignore data files
 /data/*
 !/data/.gitkeep
+!/data/*.py
+!/data/README.md
+!/data/LICENSE
+!/data/DATA_DICTIONARY.csv
+!/data/citation.cff
 
 # Output data
 /output/data/*
