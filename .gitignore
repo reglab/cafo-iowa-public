@@ -1,11 +1,9 @@
-# Data folder in root directory — commit scripts and metadata, ignore data files
+# Data folder — all contents excluded (data on HuggingFace and Figshare)
 /data/*
 !/data/.gitkeep
-!/data/*.py
-!/data/README.md
-!/data/LICENSE
-!/data/DATA_DICTIONARY.csv
-!/data/citation.cff
+
+# Secrets file
+secrets.yaml
 
 # Output data
 /output/data/*
