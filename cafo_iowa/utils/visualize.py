@@ -196,6 +196,7 @@ def plot_facility_example(
     basemap_source=ctx.providers.Esri.WorldImagery,
     save_path=None,
     dpi=300,
+    zoom=1,
     show_facility=True,
     show_barns=True,
     show_permits=True,
@@ -219,6 +220,8 @@ def plot_facility_example(
     - basemap_source: Contextily basemap source (default Esri World Imagery).
     - save_path: File path to save the figure; if None, the plot is not saved.
     - dpi: DPI for saving the figure (default 300).
+    - zoom: Zoom factor >= 1. Narrows the viewport to buffer/zoom meters in each direction,
+            centered at the same point. Scale bar label is divided by zoom accordingly.
     - show_facility: Whether to show the facility boundary (default True).
     - show_barns: Whether to show barn geometries (default True).
     - show_permits: Whether to show permit geometries (default True).
@@ -226,6 +229,9 @@ def plot_facility_example(
     - show_legend: Whether to show the legend (default True).
     - show_scale: Whether to show the scale bar (default True).
     """
+
+    if zoom < 1:
+        raise ValueError("zoom must be >= 1")
 
     # ---------- helpers -----------------------------------------------------
     def convert_geom(geom):
@@ -304,8 +310,8 @@ def plot_facility_example(
     else:
         center = fac_gdf.geometry.unary_union.centroid
     # Define a fixed half-width and half-height (in meters); here, we use the buffer parameter.
-    half_width = buffer
-    half_height = buffer
+    half_width = buffer / zoom
+    half_height = buffer / zoom
     ax.set_xlim(center.x - half_width, center.x + half_width)
     ax.set_ylim(center.y - half_height, center.y + half_height)
 
@@ -314,13 +320,14 @@ def plot_facility_example(
 
     # Add Scale Bar (10 meters)
     if show_scale:
-        scale_length = 100  # 100 meters
-        scale_x = center.x - half_width + 10
-        scale_y = center.y + half_height - 10
+        scale_length = 100 / zoom
+        margin = 10 / zoom
+        scale_x = center.x - half_width + margin
+        scale_y = center.y + half_height - margin
 
         # Create alternating black and white stripes
-        stripe_width = 20  # width of each stripe in meters
-        num_stripes = int(scale_length / stripe_width)
+        num_stripes = 5
+        stripe_width = scale_length / num_stripes
 
         for i in range(num_stripes):
             # Alternate between black and white stripes
@@ -353,8 +360,8 @@ def plot_facility_example(
         # Add scale text
         ax.text(
             scale_x + scale_length / 2,
-            scale_y - 40,
-            "100m",
+            scale_y - 40 / zoom,
+            f"{int(scale_length)}m",
             ha="center",
             fontsize=8,
             color="black",
