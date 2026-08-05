@@ -197,6 +197,7 @@ def plot_facility_example(
     save_path=None,
     dpi=300,
     zoom=1,
+    ax=None,
     show_facility=True,
     show_barns=True,
     show_permits=True,
@@ -279,8 +280,13 @@ def plot_facility_example(
     barn_gdf = barn_gdf.to_crs(epsg=3857)
     permit_gdf = permit_gdf.to_crs(epsg=3857)
 
-    # Create the plot with fixed figure size.
-    fig, ax = plt.subplots(figsize=figsize)
+    # Create the plot with fixed figure size (or use provided axes for embedding in a grid).
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+        _standalone = True
+    else:
+        fig = ax.get_figure()
+        _standalone = False
 
     # Plot facility boundary.
     if show_facility:
@@ -296,7 +302,8 @@ def plot_facility_example(
     if show_permits:
         if permit_gdf.geom_type.unique()[0] == "Point":
             permit_gdf.plot(
-                ax=ax, color="yellow", markersize=20, label="Permit Locations"
+                ax=ax, color="yellow", edgecolor="black", linewidth=0.5,
+                markersize=20, label="Permit Locations"
             )
         else:
             permit_gdf.boundary.plot(
@@ -439,11 +446,13 @@ def plot_facility_example(
     ):  # Only add legend if there are elements to show and legend is enabled
         ax.legend(handles=legend_elements, loc="lower right")
 
-    # Force the axes to fill the figure completely to avoid variable margins.
-    ax.set_position([0, 0, 1, 1])
+    # Force the axes to fill the figure completely (only in standalone mode).
+    if _standalone:
+        ax.set_position([0, 0, 1, 1])
 
     # Save the plot if a save_path is provided.
     if save_path:
         plt.savefig(save_path, dpi=dpi, bbox_inches="tight", pad_inches=0)
-    plt.show()
+    if _standalone:
+        plt.show()
     return fig, ax
