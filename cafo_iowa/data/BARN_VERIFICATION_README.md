@@ -27,7 +27,11 @@ tiles, sized to guarantee every one of its barn annotations is fully contained:
   - `image_marked.png` — the same crop, RGB-rendered, with the facility boundary, permit
     marker, and each barn individually numbered.
 - Returns a dict (facility_id, window bounds, tile CRS, tiles used, and a
-  barn-number-to-`processed.barns.id` mapping) for the caller to persist as metadata.
+  barn-number-to-`processed.barns.id` mapping) for the caller to persist as metadata. Each
+  barn entry includes both its projected geometry (`geometry_wkt`, in `tile_crs`) and its
+  pixel-space coordinates on `image_marked.png`/`image_unmarked.png` (`pixel_polygon`, the
+  true — possibly rotated — footprint; `pixel_bbox`, its axis-aligned bounding box), so a
+  reader can index directly against the rendered image instead of reprojecting WKT.
 
 This is a new, independent function — it does not call or modify `plot_facility_example`.
 Unlike that function, it pulls real NAIP tiles rather than a `contextily` web basemap, and

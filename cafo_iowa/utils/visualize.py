@@ -593,6 +593,14 @@ def build_facility_crop(
     dpi = 100
     figsize = (output_pixels / dpi, output_pixels / dpi)
 
+    # Pixel-space conversion for image_marked.png / image_unmarked.png (both output_pixels x
+    # output_pixels, origin top-left, x right / y down) -- lets a downstream reader index
+    # barn annotations directly against the rendered image instead of reprojecting WKT.
+    def _to_pixel(x, y):
+        px = (x - wminx) / (wmaxx - wminx) * output_pixels
+        py = (wmaxy - y) / (wmaxy - wminy) * output_pixels
+        return [px, py]
+
     def _new_ax():
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
         ax.set_position([0, 0, 1, 1])
@@ -622,7 +630,16 @@ def build_facility_crop(
                 ha="center", va="center",
                 path_effects=[pe.withStroke(linewidth=3, foreground="red")],
             )
-            barn_meta.append({"number": i, "id": barns.iloc[i - 1]["id"], "geometry_wkt": barns.iloc[i - 1].geometry.wkt})
+            pixel_polygon = [_to_pixel(x, y) for x, y in row.geometry.exterior.coords]
+            pxs = [p[0] for p in pixel_polygon]
+            pys = [p[1] for p in pixel_polygon]
+            barn_meta.append({
+                "number": i,
+                "id": barns.iloc[i - 1]["id"],
+                "geometry_wkt": barns.iloc[i - 1].geometry.wkt,
+                "pixel_polygon": pixel_polygon,
+                "pixel_bbox": [min(pxs), min(pys), max(pxs), max(pys)],
+            })
     fig.savefig(os.path.join(out_dir, "image_marked.png"), dpi=dpi)
     plt.close(fig)
 
@@ -632,5 +649,11 @@ def build_facility_crop(
         "window_crs": "EPSG:26915",
         "tile_crs": str(tile_crs),
         "tiles_used": tile_ids,
+        "pixel_image_size": output_pixels,
+        "pixel_space_note": (
+            "pixel_polygon/pixel_bbox on each barn are in image_marked.png/"
+            "image_unmarked.png pixel coordinates (both output_pixels x output_pixels): "
+            "origin top-left, x increases right, y increases down."
+        ),
         "barns": barn_meta,
     }
