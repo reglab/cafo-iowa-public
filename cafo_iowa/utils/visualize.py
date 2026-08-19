@@ -1,3 +1,4 @@
+import json
 import os
 
 import contextily as ctx
@@ -5,11 +6,17 @@ import folium
 import geopandas as gpd
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
+import numpy as np
 import rasterio
+import sqlalchemy
 import yaml
 from matplotlib.patches import Patch
+from rasterio.merge import merge as rasterio_merge
 from rasterio.plot import show
+from rasterio.windows import from_bounds as window_from_bounds
+from rasterio.windows import transform as window_transform
 from shapely import wkt
+from shapely.geometry import box
 from shapely.ops import unary_union  # NEW
 
 import cafo_iowa.data.helpers.gcs as gcs
@@ -447,3 +454,183 @@ def plot_facility_example(
         plt.savefig(save_path, dpi=dpi, bbox_inches="tight", pad_inches=0)
     plt.show()
     return fig, ax
+
+
+def build_facility_crop(
+    facility_id,
+    out_dir,
+    buffer=75,
+    output_pixels=1024,
+    config_filepath="cafo_iowa/data/cfg/config.yaml",
+    engine=None,
+):
+    """
+    Build a square, georeferenced image crop for one facility, sized to guarantee every
+    one of its barn annotations (processed.barns) is fully contained, plus marked/unmarked
+    PNG renders for viewing.
+
+    Unlike plot_facility_example, this takes a facility_id directly (small targeted
+    queries) rather than a pre-built facility_row from the whole-dataset get_facilities()
+    join, and it pulls real NAIP tiles (via cafo_iowa.data.helpers.gcs.download_single_img)
+    rather than a contextily web basemap.
+
+    Writes three files into out_dir:
+      - crop.tif: the cropped mosaic, ALL original NAIP bands (R,G,B,NIR), native 1m
+        resolution, real CRS/transform -- not meant for casual viewing.
+      - image_unmarked.png: same crop, RGB-rendered, resampled to output_pixels x
+        output_pixels, no annotations.
+      - image_marked.png: same crop, RGB-rendered, with facility boundary, permit
+        marker, and each barn individually numbered.
+
+    Returns a dict: {facility_id, window_bounds (in EPSG:26915), window_crs, tile_crs,
+    tiles_used, barns: [{number, id, geometry_wkt}]} -- for the caller to fold into its
+    own metadata.json (this function doesn't know about inspection documents).
+    """
+    if engine is None:
+        engine = s.get_engine()
+
+    # ---- 1. targeted per-facility geometry fetch (NOT get_facilities()) ----
+    fac = gpd.read_postgis(
+        sqlalchemy.text(
+            "SELECT facility_id, geometry FROM processed.facilities WHERE facility_id = :fid"
+        ),
+        engine, geom_col="geometry", params={"fid": facility_id},
+    )
+    if fac.empty:
+        raise ValueError(f"No facility found for facility_id={facility_id!r}")
+    facility_crs = fac.crs
+
+    barns = gpd.read_postgis(
+        sqlalchemy.text(
+            "SELECT id, geometry FROM processed.barns WHERE facility_id = :fid"
+        ),
+        engine, geom_col="geometry", params={"fid": facility_id},
+    )
+    permits = gpd.read_postgis(
+        sqlalchemy.text(
+            "SELECT geometry FROM processed.permits WHERE facility_id = :fid"
+        ),
+        engine, geom_col="geometry", params={"fid": facility_id},
+    )
+
+    # ---- 2. window geometry: square, centered on the (first) permit point, sized to ----
+    # ---- guarantee every barn is inside + a fixed buffer ----
+    if not permits.empty:
+        center = permits.geometry.iloc[0]
+    else:
+        center = fac.geometry.iloc[0].centroid
+
+    if not barns.empty:
+        half_side = buffer
+        for geom in barns.geometry:
+            minx, miny, maxx, maxy = geom.bounds
+            for cx, cy in [(minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)]:
+                dist = ((cx - center.x) ** 2 + (cy - center.y) ** 2) ** 0.5
+                half_side = max(half_side, dist + buffer)
+    else:
+        half_side = buffer
+
+    window_bounds = (
+        center.x - half_side, center.y - half_side,
+        center.x + half_side, center.y + half_side,
+    )
+    window_geom_26915 = box(*window_bounds)
+
+    # ---- 3. tile selection against the WINDOW (not the raw facility polygon) ----
+    window_gdf = gpd.GeoDataFrame({"id": [0]}, geometry=[window_geom_26915], crs=facility_crs)
+    with engine.connect() as conn:
+        tiles = gpd.read_postgis(
+            sqlalchemy.text(
+                "SELECT id, geometry FROM processed.naip21_qt "
+                "WHERE ST_Intersects(geometry, ST_GeomFromText(:wkt, :srid))"
+            ),
+            conn, geom_col="geometry",
+            params={"wkt": window_geom_26915.wkt, "srid": facility_crs.to_epsg()},
+        )
+    if tiles.empty:
+        raise ValueError(f"No naip21_qt tiles intersect the crop window for facility_id={facility_id!r}")
+    tile_ids = tiles["id"].tolist()
+
+    # ---- 4. fetch + mosaic tiles ----
+    tile_paths = [gcs.download_single_img(t, config_filepath=config_filepath) for t in tile_ids]
+    srcs = [rasterio.open(p) for p in tile_paths]
+    tile_crs = srcs[0].crs
+    merged_arr, merged_transform = rasterio_merge(srcs)
+    for src in srcs:
+        src.close()
+
+    # ---- 5. reproject window to the raster's actual CRS (NAD83 UTM vs WGS84 UTM differ) ----
+    window_gdf_tilecrs = window_gdf.to_crs(tile_crs)
+    wminx, wminy, wmaxx, wmaxy = window_gdf_tilecrs.geometry.iloc[0].bounds
+
+    pixel_window = window_from_bounds(wminx, wminy, wmaxx, wmaxy, transform=merged_transform)
+    pixel_window = pixel_window.round_offsets().round_lengths()
+    # clip to the merged raster's own extent
+    full_h, full_w = merged_arr.shape[1], merged_arr.shape[2]
+    col_off = max(0, int(pixel_window.col_off))
+    row_off = max(0, int(pixel_window.row_off))
+    col_end = min(full_w, col_off + int(pixel_window.width))
+    row_end = min(full_h, row_off + int(pixel_window.height))
+
+    cropped = merged_arr[:, row_off:row_end, col_off:col_end]
+    from rasterio.windows import Window
+    cropped_transform = window_transform(Window(col_off, row_off, col_end - col_off, row_end - row_off), merged_transform)
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    # ---- 6. write crop.tif: all original bands, native resolution, real georeferencing ----
+    crop_tif_path = os.path.join(out_dir, "crop.tif")
+    with rasterio.open(
+        crop_tif_path, "w", driver="GTiff",
+        height=cropped.shape[1], width=cropped.shape[2], count=cropped.shape[0],
+        dtype=cropped.dtype, crs=tile_crs, transform=cropped_transform,
+    ) as dst:
+        dst.write(cropped)
+
+    # ---- 7. render PNGs (RGB only, resampled to output_pixels x output_pixels) ----
+    rgb = np.dstack([cropped[0], cropped[1], cropped[2]])
+    extent = (wminx, wmaxx, wminy, wmaxy)  # matches cropped_transform's actual bounds closely enough for display
+    dpi = 100
+    figsize = (output_pixels / dpi, output_pixels / dpi)
+
+    def _new_ax():
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        ax.set_position([0, 0, 1, 1])
+        ax.axis("off")
+        ax.imshow(rgb, extent=extent, origin="upper")
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+        return fig, ax
+
+    fig, ax = _new_ax()
+    fig.savefig(os.path.join(out_dir, "image_unmarked.png"), dpi=dpi)
+    plt.close(fig)
+
+    fig, ax = _new_ax()
+    fac_tilecrs = fac.to_crs(tile_crs)
+    fac_tilecrs.boundary.plot(ax=ax, edgecolor="blue", linewidth=2)
+    if not permits.empty:
+        permits.to_crs(tile_crs).plot(ax=ax, color="yellow", edgecolor="black", markersize=40)
+    barn_meta = []
+    if not barns.empty:
+        barns_tilecrs = barns.to_crs(tile_crs)
+        for i, (_, row) in enumerate(barns_tilecrs.iterrows(), start=1):
+            gpd.GeoSeries([row.geometry], crs=tile_crs).boundary.plot(ax=ax, edgecolor="red", linewidth=2)
+            c = row.geometry.centroid
+            ax.annotate(
+                str(i), (c.x, c.y), color="white", fontsize=14, fontweight="bold",
+                ha="center", va="center",
+                path_effects=[pe.withStroke(linewidth=3, foreground="red")],
+            )
+            barn_meta.append({"number": i, "id": barns.iloc[i - 1]["id"], "geometry_wkt": barns.iloc[i - 1].geometry.wkt})
+    fig.savefig(os.path.join(out_dir, "image_marked.png"), dpi=dpi)
+    plt.close(fig)
+
+    return {
+        "facility_id": facility_id,
+        "window_bounds_epsg26915": window_bounds,
+        "window_crs": "EPSG:26915",
+        "tile_crs": str(tile_crs),
+        "tiles_used": tile_ids,
+        "barns": barn_meta,
+    }
