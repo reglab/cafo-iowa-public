@@ -525,8 +525,11 @@ def build_facility_crop(
         for geom in barns.geometry:
             minx, miny, maxx, maxy = geom.bounds
             for cx, cy in [(minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)]:
-                dist = ((cx - center.x) ** 2 + (cy - center.y) ** 2) ** 0.5
-                half_side = max(half_side, dist + buffer)
+                # axis-aligned distance, not radial -- radial distance can overshoot the
+                # true minimum half_side needed to contain this corner by up to sqrt(2)x
+                # (when the corner sits at a 45-degree angle from center)
+                axis_dist = max(abs(cx - center.x), abs(cy - center.y))
+                half_side = max(half_side, axis_dist + buffer)
     else:
         half_side = buffer
 
@@ -618,7 +621,7 @@ def build_facility_crop(
     fac_tilecrs = fac.to_crs(tile_crs)
     fac_tilecrs.boundary.plot(ax=ax, edgecolor="blue", linewidth=2)
     if not permits.empty:
-        permits.to_crs(tile_crs).plot(ax=ax, color="yellow", edgecolor="black", markersize=40)
+        permits.to_crs(tile_crs).plot(ax=ax, color="yellow", edgecolor="black", markersize=40, zorder=10)
     barn_meta = []
     if not barns.empty:
         barns_tilecrs = barns.to_crs(tile_crs)
