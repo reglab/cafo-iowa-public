@@ -6,6 +6,8 @@ The paper investigates whether Iowa swine CAFO operators strategically report an
 
 ## Dataset
 
+> **Dataset revision in progress.** We are currently revising portions of this dataset. Researchers interested in using this data are encouraged to contact the authors.
+
 The public release dataset is available on HuggingFace and Figshare:
 
 - **HuggingFace:** [huggingface.co/datasets/reglab/cafo-iowa](https://huggingface.co/datasets/reglab/cafo-iowa)
